@@ -1,6 +1,6 @@
-# Unified Epigenetic Clock Calculator
+# 'quickclocks' (Unified Epigenetic Clock Calculator)
 
-A comprehensive R package for calculating 40+ epigenetic clocks from DNA methylation data. Integrates clocks from multiple research labs into a single, easy-to-use interface with a single function call.
+A comprehensive R package for calculating 40+ epigenetic clocks from DNA methylation data. Integrates clocks from multiple research labs into a single, easy-to-use interface with a single function call. Accepts many inputs formats -- e.g., directory of IDAT files or beta matrix. 
 
 ## Features
 
@@ -28,7 +28,7 @@ A comprehensive R package for calculating 40+ epigenetic clocks from DNA methyla
 
 ```r
 # Install from GitHub
-devtools::install_github("yourusername/EpigeneticClockCalculator")
+devtools::install_github("brianchengithub/quickclocks")
 ```
 
 ### Option 2: Source Directly
@@ -58,16 +58,14 @@ source("install_dependencies.R")
 
 ```r
 # Load the package (or source the file)
-library(EpigeneticClockCalculator)
+library(quickclocks)
 
 # Calculate all clocks from IDAT files
 results <- calculate_clocks("/path/to/idat/directory")
 
-# Or from a beta matrix
+# Or from a numeric matrix (of DNA methylation beta values)
 results <- calculate_clocks(beta_matrix)
 
-# View results
-head(results)
 ```
 
 ### Input Options
@@ -219,7 +217,7 @@ Custom chromosome-based method:
 ### PC Clock Phenotype Inference
 
 PC clocks require Age and Sex inputs. When not provided:
-- **Age**: Uses Horvath2 estimate
+- **Age**: Uses Horvath2 (Skin & Blood clock) estimate
 - **Sex**: Uses chromosome-based inference
 
 ### Caching
@@ -337,7 +335,7 @@ Contributions welcome! Please open an issue or submit a pull request.
 
 ## Changelog
 
-### v2.0.0
+### v1.0.0
 - Single function interface (`calculate_clocks()`)
 - EpiDISH cell deconvolution (RPC + CP methods)
 - PC clocks with automatic phenotype inference

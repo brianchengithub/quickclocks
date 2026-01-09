@@ -2,7 +2,7 @@
 #' Diagnostic script to check epigenetic clock packages
 #' Run this to understand what's available and working
 
-cat("=== EPIGENETIC CLOCK PACKAGE DIAGNOSTICS ===\n\n")
+cat("=== 'QUICKCLOCKS' PACKAGE DIAGNOSTICS ===\n\n")
 
 # ============================================================================
 # 1. Check SeSAMe

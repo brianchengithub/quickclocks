@@ -1,12 +1,12 @@
 #!/usr/bin/env Rscript
 #' ============================================================================
-#' Unified Epigenetic Clock Calculator
+#' 'quickclocks'  (Unified Epigenetic Clock Calculator)
 #' ============================================================================
 #' 
 #' Simple R interface for calculating 40+ epigenetic clocks from DNA methylation data.
 #' 
-#' @author Your Name
-#' @version 2.0.0
+#' @author Brian Chen
+#' @version 1.0.0
 #' ============================================================================
 
 
@@ -498,7 +498,7 @@ calculate_clocks <- function(input, pheno = NULL, n_cores = NULL, verbose = TRUE
   if (verbose) {
     cat("\n")
     cat("==============================================================\n")
-    cat("       UNIFIED EPIGENETIC CLOCK CALCULATOR v2.0.0\n")
+    cat("       'quickclocks' v1.0.0\n")
     cat("==============================================================\n")
     cat("\n")
     cat("Integrating clocks from:\n")

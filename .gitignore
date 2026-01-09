@@ -1,49 +1,54 @@
-# History files
+# R files
+.Rproj.user
 .Rhistory
-.Rapp.history
-
-# Session Data files
 .RData
-.RDataTmp
-
-# User-specific files
 .Ruserdata
+*.Rproj
 
-# Example code in package build process
-*-Ex.R
+# Package build files
+*.tar.gz
+*.Rcheck/
+man/*.Rd
+NAMESPACE.bak
 
-# Output files from R CMD build
-/*.tar.gz
+# Output and intermediate files
+results/
+output/
+*.rds
+*.RDS
+!inst/extdata/*.rds
 
-# Output files from R CMD check
-/*.Rcheck/
+# Data files (too large for git)
+*.idat
+*.IDAT
+data/
 
-# RStudio files
-.Rproj.user/
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
+# System files
+.DS_Store
+Thumbs.db
 
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
+# Log files
+*.log
+logs/
 
-# knitr and R markdown default cache directories
-*_cache/
-/cache/
+# Temporary files
+tmp/
+temp/
+*.tmp
 
-# Temporary files created by R markdown
-*.utf8.md
-*.knit.md
+# Test output
+tests/testthat/output/
+coverage/
 
-# R Environment Variables
-.Renviron
+# Cache directories (large downloaded files)
+.epigenetic_clock_cache/
+~/.epigenetic_clock_cache/
 
-# pkgdown site
-docs/
-
-# translation temp files
-po/*~
-
-# RStudio Connect folder
-rsconnect/
+# Large PC clocks data file (downloaded from Zenodo)
+inst/extdata/PCClocks_data.qs2

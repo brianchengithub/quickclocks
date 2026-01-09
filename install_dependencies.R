@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 #' ============================================================================
-#' Install Dependencies for Epigenetic Clock Calculator
+#' Install Dependencies for 'quickclocks' Epigenetic Clock Calculator
 #' ============================================================================
 #' 
 #' This script installs all required packages from CRAN, Bioconductor, and GitHub.
