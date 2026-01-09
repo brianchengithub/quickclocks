@@ -1,0 +1,54 @@
+# R files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Package build files
+*.tar.gz
+*.Rcheck/
+man/*.Rd
+NAMESPACE.bak
+
+# Output and intermediate files
+results/
+output/
+*.rds
+*.RDS
+!inst/extdata/*.rds
+
+# Data files (too large for git)
+*.idat
+*.IDAT
+data/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test output
+tests/testthat/output/
+coverage/
+
+# Cache directories (large downloaded files)
+.epigenetic_clock_cache/
+~/.epigenetic_clock_cache/
+
+# Large PC clocks data file (downloaded from Zenodo)
+inst/extdata/PCClocks_data.qs2
