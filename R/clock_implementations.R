@@ -79,7 +79,7 @@ calc_horvath1_direct <- function(betas, coeffs) {
     cpg_col <- colnames(coef_df)[1]
   }
   
-  if ("CoesCoefficient" %in% colnames(coef_df)) {
+  if ("CoefficientTraining" %in% colnames(coef_df)) {
     weight_col <- "CoefficientTraining"
   } else if ("weight" %in% colnames(coef_df)) {
     weight_col <- "weight"
@@ -359,49 +359,75 @@ calculate_clocks_direct <- function(betas, verbose = TRUE) {
 
 
 #' Generic weighted sum clock calculator
-#' @param betas Beta matrix
+#'
+#' Calculates epigenetic clock values using a weighted sum of CpG beta values.
+#' Automatically detects CpG and weight columns if not specified.
+#'
+#' @param betas Beta matrix (CpGs as rows, samples as columns)
 #' @param coef_df Data frame with CpG and weight columns
-#' @param cpg_col Name of CpG column
-#' @param weight_col Name of weight column
-#' @param intercept Intercept value (default 0)
-#' @return Named vector of clock values
+#' @param cpg_col Name of CpG column (auto-detected if NULL)
+#' @param weight_col Name of weight column (auto-detected if NULL)
+#' @param intercept Intercept value. If NULL, extracted from coef_df if present (default NULL)
+#' @param transform_func Optional transformation function to apply to results (e.g., horvath_age_transform)
+#' @return Named vector of clock values, or NULL if no CpGs match
 #' @keywords internal
-calc_weighted_sum_clock <- function(betas, coef_df, cpg_col = NULL, weight_col = NULL, intercept = 0) {
-  
-  # Auto-detect columns if not specified
+calc_weighted_sum_clock <- function(betas, coef_df, cpg_col = NULL, weight_col = NULL,
+                                    intercept = NULL, transform_func = NULL) {
+
+  # Auto-detect CpG column if not specified
   if (is.null(cpg_col)) {
-    cpg_candidates <- c("CpG", "CpGmarker", "probe", "Probe", "cpg")
+    cpg_candidates <- c("CpG", "CpGmarker", "probe", "Probe", "cpg", "ID")
     cpg_col <- intersect(cpg_candidates, colnames(coef_df))[1]
     if (is.na(cpg_col)) cpg_col <- colnames(coef_df)[1]
   }
-  
+
+  # Auto-detect weight column if not specified
   if (is.null(weight_col)) {
-    weight_candidates <- c("Coefficient", "weight", "Weight", "coef", "beta")
+    weight_candidates <- c("Coefficient", "CoefficientTraining", "weight", "Weight", "coef", "beta")
     weight_col <- intersect(weight_candidates, colnames(coef_df))[1]
-    if (is.na(weight_col)) weight_col <- colnames(coef_df)[2]
+    if (is.na(weight_col)) {
+      # Fallback: find first numeric column that's not the CpG column
+      numeric_cols <- sapply(coef_df, is.numeric)
+      numeric_cols[cpg_col] <- FALSE
+      weight_col <- names(which(numeric_cols))[1]
+    }
   }
-  
-  cpgs <- coef_df[[cpg_col]]
-  weights <- coef_df[[weight_col]]
-  
-  # Remove intercept row if present
-  intercept_mask <- cpgs %in% c("(Intercept)", "Intercept") | is.na(cpgs)
+
+  # Return NULL if we couldn't identify columns
+ if (is.na(weight_col) || is.null(weight_col)) return(NULL)
+
+  # Extract and coerce data
+  cpgs <- as.character(coef_df[[cpg_col]])
+  weights <- as.numeric(coef_df[[weight_col]])
+
+  # Remove intercept row if present and extract intercept value
+  intercept_mask <- cpgs %in% c("(Intercept)", "Intercept") | is.na(cpgs) | cpgs == ""
   if (any(intercept_mask)) {
-    intercept <- weights[intercept_mask][1]
+    extracted_intercept <- weights[intercept_mask][1]
+    if (is.na(extracted_intercept)) extracted_intercept <- 0
     cpgs <- cpgs[!intercept_mask]
     weights <- weights[!intercept_mask]
+    # Use extracted intercept if none was provided
+    if (is.null(intercept)) intercept <- extracted_intercept
+  } else if (is.null(intercept)) {
+    intercept <- 0
   }
-  
-  # Match CpGs
+
+  # Match CpGs to beta matrix rows
   matched_idx <- match(cpgs, rownames(betas))
   valid <- !is.na(matched_idx)
-  
+
   if (sum(valid) == 0) return(NULL)
-  
+
   betas_subset <- betas[matched_idx[valid], , drop = FALSE]
   weights_valid <- weights[valid]
-  
+
   clock_values <- intercept + colSums(betas_subset * weights_valid, na.rm = TRUE)
-  
+
+  # Apply transformation if provided (e.g., Horvath age transformation)
+  if (!is.null(transform_func)) {
+    clock_values <- transform_func(clock_values)
+  }
+
   return(clock_values)
 }

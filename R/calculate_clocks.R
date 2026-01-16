@@ -201,27 +201,16 @@ infer_sex_from_betas <- function(betas, platform = "EPIC", verbose = TRUE) {
   # Median methylation on X and Y
   x_median <- apply(x_betas, 2, median, na.rm = TRUE)
   y_median <- apply(y_betas, 2, median, na.rm = TRUE)
-  
-  # Sex inference logic:
+
+  # Sex inference logic (vectorized):
   # Females (XX): Higher X methylation due to X-inactivation, very low Y signal
   # Males (XY): Lower X methylation, higher Y signal
-  
   # Y chromosome median is key - males have methylation, females have noise
-  # Threshold: Y median > 0.1 suggests male
-  
-  for (i in seq_len(n_samples)) {
-    if (y_median[i] > 0.2) {
-      # Clear Y signal -> Male
-      sex_pred[i] <- 0
-    } else if (y_median[i] < 0.1 && x_median[i] > 0.3) {
-      # Low Y, higher X -> Female
-      sex_pred[i] <- 1
-    } else {
-      # Ambiguous
-      sex_pred[i] <- 0.5
-    }
-  }
-  
+
+  # Vectorized assignment: default to ambiguous (0.5), then override
+  sex_pred <- ifelse(y_median > 0.2, 0,                          # Clear Y signal -> Male
+              ifelse(y_median < 0.1 & x_median > 0.3, 1, 0.5))   # Low Y, high X -> Female; else ambiguous
+
   if (verbose) {
     n_male <- sum(sex_pred == 0)
     n_female <- sum(sex_pred == 1)
@@ -235,65 +224,10 @@ infer_sex_from_betas <- function(betas, platform = "EPIC", verbose = TRUE) {
 
 # ============================================================================
 # Direct Clock Implementation Functions
-# These bypass problematic lazy data loading in packages
+# Note: Core functions (initialize_clock_coefficients, calc_weighted_sum_clock,
+# calc_epitoc2_direct) are defined in clock_implementations.R
+# This file contains helper transformations and additional clock calculations.
 # ============================================================================
-
-#' Initialize clock coefficients from installed packages
-#' @return List of coefficient data frames
-#' @keywords internal
-initialize_clock_coefficients <- function() {
-  coeffs <- list()
-  
-  # ===== methylCIPHER coefficients =====
-  if (requireNamespace("methylCIPHER", quietly = TRUE)) {
-    mc_datasets <- c(
-      "Horvath1_CpGs", "Horvath2_CpGs", "Hannum_CpGs", "PhenoAge_CpGs",
-      "DNAmTL_CpGs", "Lin_CpGs", "Zhang_10_CpG", "Zhang2019_CpGs",
-      "Bocklandt_CpG", "Weidner_CpGs", "VidalBralo_CpGs", "Garagnani_CpG",
-      "PCClocks_CpGs", "HorvathOnlineRef",
-      "AdaptAge_CpGs", "CausAge_CpGs", "DamAge_CpGs", "SystemsAge_CpGs",
-      "EpiToc_CpGs", "EpiToc2_CpGs", "hypoClock_CpGs", "MiAge_CpGs"
-    )
-    
-    for (d in mc_datasets) {
-      tryCatch({
-        temp_env <- new.env()
-        data(list = d, package = "methylCIPHER", envir = temp_env)
-        if (exists(d, envir = temp_env)) {
-          coeffs[[d]] <- get(d, envir = temp_env)
-        }
-      }, error = function(e) NULL, warning = function(w) NULL)
-    }
-  }
-  
-  # ===== EpiMitClocks coefficients =====
-  if (requireNamespace("EpiMitClocks", quietly = TRUE)) {
-    epi_datasets <- list(
-      "dataETOC3" = "dataETOC3.l",
-      "estETOC3" = "estETOC3.m", 
-      "epiTOCcpgs3" = "epiTOCcpgs3.v",
-      "cugpmitclockCpG" = "cugpmitclockCpG.v",
-      "EpiCMITcpgs" = "epiCMIT.df",
-      "Replitali" = c("replitali.coe", "replitali.cpg.v")
-    )
-    
-    for (load_name in names(epi_datasets)) {
-      tryCatch({
-        temp_env <- new.env()
-        data(list = load_name, package = "EpiMitClocks", envir = temp_env)
-        obj_names <- epi_datasets[[load_name]]
-        for (obj in obj_names) {
-          if (exists(obj, envir = temp_env)) {
-            coeffs[[obj]] <- get(obj, envir = temp_env)
-          }
-        }
-      }, error = function(e) NULL, warning = function(w) NULL)
-    }
-  }
-  
-  return(coeffs)
-}
-
 
 #' Horvath age transformation (anti-log transformation)
 #' Converts raw clock values to DNAm age in years
@@ -309,121 +243,6 @@ horvath_age_transform <- function(x, adult_age = 20) {
   ifelse(x < 0,
          (adult_age + 1) * exp(x) - 1,
          (adult_age + 1) * x + adult_age)
-}
-
-
-#' Generic weighted sum clock calculator
-#' @param betas Beta matrix (CpGs as rows, samples as columns)
-#' @param coef_df Data frame with CpG and weight columns
-#' @param transform_func Optional transformation function to apply to results
-#' @return Named vector of clock values
-#' @keywords internal
-calc_weighted_sum_clock <- function(betas, coef_df, transform_func = NULL) {
-  
-  # Auto-detect CpG column
-  cpg_candidates <- c("CpG", "CpGmarker", "probe", "Probe", "cpg", "ID")
-  cpg_col <- intersect(cpg_candidates, colnames(coef_df))[1]
-  if (is.na(cpg_col)) cpg_col <- colnames(coef_df)[1]
-  
-  # Auto-detect weight column
-  weight_candidates <- c("Coefficient", "CoefficientTraining", "weight", "Weight", "coef", "beta")
-  weight_col <- intersect(weight_candidates, colnames(coef_df))[1]
-  if (is.na(weight_col)) {
-    # Find first numeric column that's not the CpG column
-    numeric_cols <- sapply(coef_df, is.numeric)
-    numeric_cols[cpg_col] <- FALSE
-    weight_col <- names(which(numeric_cols))[1]
-  }
-  
-  if (is.na(weight_col)) return(NULL)
-  
-  cpgs <- as.character(coef_df[[cpg_col]])
-  weights <- as.numeric(coef_df[[weight_col]])
-  
-  # Remove intercept row if present
-  intercept_mask <- cpgs %in% c("(Intercept)", "Intercept") | is.na(cpgs) | cpgs == ""
-  if (any(intercept_mask)) {
-    intercept <- weights[intercept_mask][1]
-    if (is.na(intercept)) intercept <- 0
-    cpgs <- cpgs[!intercept_mask]
-    weights <- weights[!intercept_mask]
-  } else {
-    intercept <- 0
-  }
-  
-  # Match CpGs
-  matched_idx <- match(cpgs, rownames(betas))
-  valid <- !is.na(matched_idx)
-  
-  if (sum(valid) == 0) return(NULL)
-  
-  betas_subset <- betas[matched_idx[valid], , drop = FALSE]
-  weights_valid <- weights[valid]
-  
-  clock_values <- intercept + colSums(betas_subset * weights_valid, na.rm = TRUE)
-  
-  # Apply transformation if provided (e.g., Horvath age transformation)
-  if (!is.null(transform_func)) {
-    clock_values <- transform_func(clock_values)
-  }
-  
-  return(clock_values)
-}
-
-
-#' Calculate epiTOC2 mitotic clock directly
-#' @param betas Beta matrix (CpGs as rows, samples as columns)
-#' @param coeffs Pre-loaded coefficients list
-#' @return Named vector of TNSC values
-#' @keywords internal
-calc_epitoc2_direct <- function(betas, coeffs) {
-  
-  estETOC2 <- NULL
-  
-  # Try EpiMitClocks data format
-  if ("dataETOC3.l" %in% names(coeffs)) {
-    data_list <- coeffs[["dataETOC3.l"]]
-    if (is.list(data_list) && length(data_list) >= 1) {
-      estETOC2 <- data_list[[1]]
-    }
-  }
-  
-  # Try methylCIPHER data format
-  if (is.null(estETOC2) && "EpiToc2_CpGs" %in% names(coeffs)) {
-    estETOC2 <- coeffs$EpiToc2_CpGs
-  }
-  
-  if (is.null(estETOC2)) return(NULL)
-  
-  cpgs <- rownames(estETOC2)
-  if (is.null(cpgs)) return(NULL)
-  
-  matched_idx <- match(cpgs, rownames(betas))
-  valid <- !is.na(matched_idx)
-  
-  n_valid <- sum(valid)
-  if (n_valid == 0) return(NULL)
-  
-  message(sprintf("    epiTOC2: Using %d of %d CpGs", n_valid, length(cpgs)))
-  
-  betas_matched <- betas[matched_idx[valid], , drop = FALSE]
-  params_matched <- estETOC2[valid, , drop = FALSE]
-  
-  if (ncol(params_matched) >= 2) {
-    delta <- params_matched[, 1]
-    beta0 <- params_matched[, 2]
-    
-    tnsc <- apply(betas_matched, 2, function(b) {
-      denom <- delta * (1 - beta0)
-      denom[denom == 0] <- NA
-      scores <- (b - beta0) / denom
-      2 * mean(scores, na.rm = TRUE)
-    })
-    
-    return(tnsc)
-  }
-  
-  return(NULL)
 }
 
 
@@ -1018,40 +837,47 @@ compute_all_clocks <- function(betas, pheno = NULL, n_cores, verbose = TRUE) {
     # Clocks that need Horvath age transformation (anti.trafo)
     horvath_transform_clocks <- c("Horvath1", "Horvath2")
     
-    computed_direct <- c()
-    
+    # Pre-allocate list for computed clock names (avoids O(n^2) vector concatenation)
+    computed_direct <- vector("list", length(mc_clocks) + 1)
+    computed_idx <- 0L
+
     for (clock_name in names(mc_clocks)) {
       coef_name <- mc_clocks[[clock_name]]
       if (coef_name %in% names(coeffs)) {
         tryCatch({
           # Apply Horvath age transformation for Horvath1 and Horvath2
           if (clock_name %in% horvath_transform_clocks) {
-            result <- calc_weighted_sum_clock(betas, coeffs[[coef_name]], 
+            result <- calc_weighted_sum_clock(betas, coeffs[[coef_name]],
                                               transform_func = horvath_age_transform)
           } else {
             result <- calc_weighted_sum_clock(betas, coeffs[[coef_name]])
           }
           if (!is.null(result) && length(result) == ncol(betas)) {
             results[[clock_name]] <- as.numeric(result)
-            computed_direct <- c(computed_direct, clock_name)
+            computed_idx <- computed_idx + 1L
+            computed_direct[[computed_idx]] <- clock_name
           }
         }, error = function(e) {
           if (verbose) message("    ", clock_name, " error: ", e$message)
         })
       }
     }
-    
+
     # ===== epiTOC2 direct calculation =====
     tryCatch({
       toc2 <- calc_epitoc2_direct(betas, coeffs)
       if (!is.null(toc2) && length(toc2) == ncol(betas)) {
         results$epiTOC2_TNSC <- toc2
-        computed_direct <- c(computed_direct, "epiTOC2_TNSC")
+        computed_idx <- computed_idx + 1L
+        computed_direct[[computed_idx]] <- "epiTOC2_TNSC"
       }
     }, error = function(e) {
       if (verbose) message("    epiTOC2 direct error: ", e$message)
     })
-    
+
+    # Convert list to vector (only non-NULL elements)
+    computed_direct <- unlist(computed_direct[seq_len(computed_idx)])
+
     if (verbose && length(computed_direct) > 0) {
       message("    Direct clocks: ", paste(computed_direct, collapse = ", "))
     }

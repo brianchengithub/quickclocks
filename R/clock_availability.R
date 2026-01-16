@@ -135,54 +135,45 @@ get_all_clock_names <- function() {
 
 
 #' Check availability of all clocks based on available probes
-#' 
+#'
 #' @param available_probes Character vector of probe IDs in the data
 #' @param reference_betas Reference beta values (for zero-shot capability)
 #' @param config Configuration list
+#' @param verbose Logical, whether to print progress messages (default: NULL uses config$verbose or TRUE)
 #' @return Data frame with clock availability information
 #' @export
 check_all_clock_availability <- function(available_probes, reference_betas = NULL,
-                                          config = list()) {
-  
-  verbose <- config$verbose %||% TRUE
+                                          config = list(), verbose = NULL) {
+
+  # Use explicit verbose parameter if provided, otherwise fall back to config
+  verbose <- verbose %||% config$verbose %||% TRUE
   
   # Get clock definitions
   clock_defs <- get_clock_definitions()
-  
-  # Initialize results
-  results <- data.frame(
-    clock_name = character(),
-    display_name = character(),
-    category = character(),
-    package = character(),
-    probes_required = integer(),
-    probes_available = integer(),
-    probes_missing = integer(),
-    probes_can_impute = integer(),
-    pct_available = numeric(),
-    can_compute = logical(),
-    reason = character(),
-    stringsAsFactors = FALSE
-  )
-  
+
+  # Collect all results in a list first (avoids O(n^2) rbind accumulation)
+  results_list <- list()
+  list_idx <- 0L
+
   # Check each clock family
   for (family in names(clock_defs)) {
     for (clock_id in names(clock_defs[[family]])) {
       clock_info <- clock_defs[[family]][[clock_id]]
-      
+
       # Get required probes for this clock
       required_probes <- get_clock_probes(clock_id, clock_info$package)
-      
+
       if (is.null(required_probes) || length(required_probes) == 0) {
         # Clock doesn't specify probes (uses built-in method)
-        # Check if package is available
-        pkg_available <- is_package_installed(clock_info$package)
-        
-        results <- rbind(results, data.frame(
+        # Check if package is available (NULL package = custom implementation, always available)
+        pkg_available <- if (is.null(clock_info$package)) TRUE else is_package_installed(clock_info$package)
+
+        list_idx <- list_idx + 1L
+        results_list[[list_idx]] <- data.frame(
           clock_name = clock_id,
           display_name = clock_info$name,
           category = clock_info$category,
-          package = clock_info$package,
+          package = if (is.null(clock_info$package)) NA_character_ else clock_info$package,
           probes_required = NA_integer_,
           probes_available = NA_integer_,
           probes_missing = NA_integer_,
@@ -191,14 +182,14 @@ check_all_clock_availability <- function(available_probes, reference_betas = NUL
           can_compute = pkg_available,
           reason = if (pkg_available) "Package available" else "Package not installed",
           stringsAsFactors = FALSE
-        ))
-        
+        )
+
       } else {
         # Check probe availability
         n_required <- length(required_probes)
         n_available <- sum(required_probes %in% available_probes)
         n_missing <- n_required - n_available
-        
+
         # Check how many missing probes can be imputed from reference
         missing_probes <- setdiff(required_probes, available_probes)
         n_can_impute <- if (!is.null(reference_betas)) {
@@ -206,25 +197,26 @@ check_all_clock_availability <- function(available_probes, reference_betas = NUL
         } else {
           0L
         }
-        
+
         pct_available <- 100 * (n_available + n_can_impute) / n_required
-        
+
         # Determine if clock can be computed
         # Allow computation if we have at least 95% of probes available or imputable
         min_pct <- config$min_probe_pct %||% 95
         can_compute <- pct_available >= min_pct
-        
+
         reason <- if (can_compute) {
           "Sufficient probes"
         } else {
           sprintf("Only %.1f%% probes available", pct_available)
         }
-        
-        results <- rbind(results, data.frame(
+
+        list_idx <- list_idx + 1L
+        results_list[[list_idx]] <- data.frame(
           clock_name = clock_id,
           display_name = clock_info$name,
           category = clock_info$category,
-          package = clock_info$package,
+          package = if (is.null(clock_info$package)) NA_character_ else clock_info$package,
           probes_required = n_required,
           probes_available = n_available,
           probes_missing = n_missing,
@@ -233,11 +225,31 @@ check_all_clock_availability <- function(available_probes, reference_betas = NUL
           can_compute = can_compute,
           reason = reason,
           stringsAsFactors = FALSE
-        ))
+        )
       }
     }
   }
-  
+
+  # Bind all results at once (O(n) instead of O(n^2))
+  if (length(results_list) > 0) {
+    results <- do.call(rbind, results_list)
+  } else {
+    results <- data.frame(
+      clock_name = character(),
+      display_name = character(),
+      category = character(),
+      package = character(),
+      probes_required = integer(),
+      probes_available = integer(),
+      probes_missing = integer(),
+      probes_can_impute = integer(),
+      pct_available = numeric(),
+      can_compute = logical(),
+      reason = character(),
+      stringsAsFactors = FALSE
+    )
+  }
+
   return(results)
 }
 
