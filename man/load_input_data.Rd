@@ -7,6 +7,8 @@
 load_input_data(input, n_cores, verbose)
 }
 \description{
-Load beta values from various input formats
+Side effects when input is an IDAT directory: stashes a discovered pheno
+frame in \code{.qc_env$discovered_pheno}, available for use by clocker()
+when the user didn't supply one explicitly.
 }
 \keyword{internal}

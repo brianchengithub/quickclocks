@@ -125,6 +125,28 @@ clocker <- function(input,
   betas <- load_input_data(input, n_cores, verbose)
   betas <- validate_betas(betas)
 
+  # ---- Stage 1b: Resolve pheno (use discovered if user didn't supply one) ----
+  # When input was an IDAT directory, process_idat_files() will have stashed
+  # an auto-discovered pheno frame (built from sample-sheet matching with
+  # synthesized rows for unmatched IDATs) in .qc_env$discovered_pheno.
+  if (is.null(pheno) && !is.null(.qc_env$discovered_pheno)) {
+    pheno <- .qc_env$discovered_pheno
+    if (verbose) {
+      n_with_age <- if ("Age" %in% colnames(pheno))
+        sum(!is.na(pheno$Age)) else 0L
+      n_with_sex <- if ("Female" %in% colnames(pheno))
+        sum(!is.na(pheno$Female)) else 0L
+      log_msg(paste("  Using auto-discovered pheno from IDAT directory",
+                       "(%d samples, Age:%d, Sex:%d)"),
+                nrow(pheno), n_with_age, n_with_sex, verbose = TRUE)
+    }
+  } else if (!is.null(pheno) && !is.null(.qc_env$discovered_pheno)) {
+    if (verbose) {
+      log_msg("  Using user-supplied pheno (auto-discovered pheno ignored)",
+              verbose = TRUE)
+    }
+  }
+
   # ---- Stage 2: Platform detection / EPICv2 normalization ----
   platform <- detect_array_platform(rownames(betas))
   if (verbose) message("  Platform detected: ", platform)

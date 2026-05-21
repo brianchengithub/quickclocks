@@ -15,6 +15,7 @@ clock projection automatically.
 - [Features](#features)
 - [Supported platforms](#supported-platforms)
 - [First-time setup](#first-time-setup)
+- [Sample sheet auto-discovery (IDAT inputs)](#sample-sheet-auto-discovery-idat-inputs)
 - [Quick start](#quick-start)
 - [Function arguments](#function-arguments)
 - [Output schema](#output-schema)
@@ -164,6 +165,106 @@ healthy.
 > the synthetic matrix to actually exercise the projection paths.
 
 ---
+
+## Sample sheet auto-discovery (IDAT inputs)
+
+When you point `clocker()` at a directory of IDAT files, it will
+automatically discover any sample sheets present and use them as
+`pheno`. You don't need to build the pheno data.frame manually.
+
+### Supported layouts
+
+```
+# Layout 1: flat directory, one sheet
+idats/
+├── sheet.csv
+├── 206203800149_R01C01_Grn.idat
+├── 206203800149_R01C01_Red.idat
+└── 206203800149_R02C01_*.idat ...
+
+# Layout 2: per-plate subdirectories, per-plate sheets
+idats/
+├── plateA/
+│   ├── plateA_sheet.csv
+│   └── *.idat
+└── plateB/
+    ├── plateB_sheet.csv
+    └── *.idat
+
+# Layout 3: concatenated parent sheet + per-plate IDAT dirs
+idats/
+├── all_samples.csv          # covers everything
+├── plateA/*.idat
+└── plateB/*.idat
+
+# Layout 4: mixed (most common in practice)
+idats/
+├── all_samples.csv          # covers most samples (slightly out of date)
+├── plateA/
+│   ├── plateA_sheet.csv     # newer per-plate corrections
+│   └── *.idat
+└── plateB/*.idat
+
+# Layout 5: no sheets at all — clocker synthesizes one per IDAT
+```
+
+All five layouts work with a single call:
+
+```r
+results <- clocker("/path/to/idats/")
+```
+
+### Matching: IDAT files to sample sheet rows
+
+For each IDAT file like `206203800149_R01C01_Grn.idat`, clocker extracts
+the **Sentrix basename** `206203800149_R01C01` and matches it against
+sample sheet rows using whichever of these columns are present (in
+priority order):
+
+1. `Basename` column equal to the Sentrix basename
+2. `Sentrix_ID` + `_` + `Sentrix_Position` equal to the Sentrix basename
+3. `Sentrix_Barcode` + `_` + `Sentrix_Position` (alternate naming)
+4. `Sample_Name` matching the Sentrix basename pattern
+
+Sheets are recognized as CSVs whose header row contains at least one of
+`Sample_Name`, `Sentrix_ID`, `Sentrix_Position`, or `Basename`.
+Illumina-style `[Header]` / `[Data]` preambles are auto-detected and
+skipped.
+
+### Conflict resolution (multiple sheets cover the same sample)
+
+When the same Sentrix basename appears in multiple sheets — common when
+a parent-level concat sheet and a per-plate sheet both list the same
+sample — clocker prefers the **subdirectory** sheet over the parent
+sheet (per-plate sheets are typically more current than concatenated
+globals). Among same-depth sheets, the most recently modified wins.
+A consolidated warning lists any non-NA conflicts that occurred.
+
+### IDATs without a matching sheet row
+
+If clocker finds IDAT files that no sample sheet matches, it
+synthesizes a minimal pheno row for each one with:
+
+- `Sample_Name` = Sentrix basename
+- `Sentrix_ID` and `Sentrix_Position` parsed from the basename
+- `Age` = NA, `Female` = NA
+
+A single warning lists the affected basenames. The pipeline runs
+normally; **age acceleration (`Accel_*` columns) will be NA** for those
+samples since chronological age is unknown.
+
+### When user-supplied pheno overrides auto-discovery
+
+If you pass `pheno = my_pheno_df` explicitly, that takes priority and
+the auto-discovered sheet is ignored (with a verbose-mode note).
+
+### Sex / Female column auto-coercion
+
+Sample sheets typically use `Sex` with values like `"Male"`/`"Female"`
+or `"M"`/`"F"`. Clocker auto-coerces these to the integer `Female`
+column (1 = female, 0 = male) used internally. Accepted formats: `0`,
+`1`, `"M"`, `"F"`, `"Male"`, `"Female"` in any case. The original `Sex`
+column is preserved alongside.
 
 ## Quick start
 
@@ -667,6 +768,7 @@ clocker/
 ├── R/
 │   ├── clocker.R                        # main function: clocker() + aliases
 │   ├── input_processing.R               # IDAT loading, betas validation
+│   ├── sample_sheets.R                  # sample sheet discovery + matching + synthesis
 │   ├── imputation.R                     # kNN + zero-shot vs. reference_betas.rds
 │   ├── sex_inference.R                  # methylQC algorithm (verbatim)
 │   ├── sex_probe_lists.R                # 314 chrY + 3,433 chrX probes

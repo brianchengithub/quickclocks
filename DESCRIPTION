@@ -1,7 +1,7 @@
 Package: clocker
 Type: Package
 Title: Unified Epigenetic Clock Calculator
-Version: 2.2.5
+Version: 2.3.0
 Authors@R: person("Brian", "Chen", role = c("aut", "cre"),
                   email = "brianchen450k@gmail.com")
 Description: A unified interface for calculating 40+ epigenetic aging clocks
@@ -35,4 +35,4 @@ Suggests:
     progress,
     curl
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.0
+RoxygenNote: 7.3.3

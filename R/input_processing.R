@@ -2,8 +2,16 @@
 # Input Processing
 #
 # Handles IDAT file loading via SeSAMe and beta matrix preparation.
-# When loading IDATs, also computes per-sample chrX/chrY *total signal
-# intensities* from the SigDFs (the methylQC sex caller's preferred input)
+#
+# When loading from a directory of IDATs, this module also:
+#   * Recursively discovers IDAT files and sample sheets in the input tree
+#   * Builds a pheno data.frame mapping IDAT basenames to sample metadata,
+#     synthesizing minimal rows for IDATs without sample-sheet matches
+#   * Stashes the resulting pheno in .qc_env$discovered_pheno so the
+#     clocker() orchestrator can use it when the user didn't supply one
+#
+# When loading IDATs, also computes per-sample chrX/chrY total signal
+# intensities from the SigDFs (the methylQC sex caller's preferred input)
 # and caches them in .qc_env so SigDFs themselves can be released after
 # beta extraction. Beta-only inputs skip this step; sex inference then
 # falls back to a beta-proxy that uses the same downstream algorithm.
@@ -12,18 +20,18 @@
 
 #' Process IDAT files using SeSAMe
 #'
-#' Pipeline applied: "QCDPB" (QC, Detection p-value, Pval drop, Background,
-#' BMIQ). SigDFs are processed streaming so we never keep the full SigDF
-#' list in memory:
-#'   1. Run openSesame to get one SigDF per sample
-#'   2. For each SigDF: compute sex intensities (chrX, chrY) into a small
-#'      data.frame, cache via cache_sex_signals()
-#'   3. Extract betas via getBetas(sdf) and cbind into a matrix
-#'   4. Drop SigDFs
+#' Pipeline: SeSAMe "QCDPB" (QC mask, channel correction, dye-bias, pOOBAH
+#' detection p-values, BMIQ).
 #'
-#' Single-sample handling (FIX H6): when a single .idat path is supplied,
-#' the underlying sample basename is preserved in colnames(betas) rather
-#' than being replaced by an arbitrary index.
+#' When given a directory, the function recursively discovers IDAT files
+#' AND sample sheets, then drives openSesame with the discovered IDAT
+#' basenames so that subdirectory-organized layouts work correctly. The
+#' resulting per-sample pheno frame (with synthesized rows for any IDATs
+#' lacking a sample-sheet match) is stashed in
+#' \code{.qc_env$discovered_pheno} for the orchestrator to consume.
+#'
+#' Single-sample handling: when a single .idat path is supplied, the
+#' underlying sample basename is preserved in colnames(betas).
 #'
 #' @keywords internal
 process_idat_files <- function(input, n_cores, verbose) {
@@ -33,10 +41,46 @@ process_idat_files <- function(input, n_cores, verbose) {
          "Install with: BiocManager::install('sesame')")
   }
 
+  # Reset any cached pheno discovery from a previous run
+  .qc_env$discovered_pheno <- NULL
+
+  # ---- Directory input: recursive discovery + sheet matching ----
   if (length(input) == 1L && dir.exists(input)) {
     if (verbose) message("  Processing IDAT directory: ", input)
-    sdfs <- sesame::openSesame(input, prep = "QCDPB", func = NULL, BPPARAM = NULL)
+
+    discovery <- build_pheno_from_idat_dir(input, verbose = verbose)
+    if (length(discovery$idat_basenames) == 0L) {
+      stop("No IDAT files found under: ", input)
+    }
+    .qc_env$discovered_pheno <- discovery$pheno
+
+    # Build the explicit list of Sentrix basenames (with directories) so we
+    # can drive openSesame on the deepest level rather than letting it walk
+    # the tree itself -- this lets us guarantee colnames(betas) == Sentrix
+    # keys, which is what the discovered pheno is keyed on.
+    idat_paths <- discover_idat_files(input)
+    basemap <- idat_basenames(idat_paths)
+    sentrix_bases <- file.path(basemap$dir, basemap$basename)
+
+    if (verbose) {
+      message(sprintf("  Loading %d IDAT pair(s) via SeSAMe...",
+                      length(sentrix_bases)))
+    }
+    sdfs <- sesame::openSesame(sentrix_bases, prep = "QCDPB", func = NULL,
+                                 BPPARAM = NULL)
+
+    # Wrap single-SigDF returns in a list for uniform handling
+    if (!is.list(sdfs) || (!is.null(sdfs$Probe_ID) && !is.list(sdfs[[1]]))) {
+      sdfs <- list(sdfs)
+    }
+    # Force names = Sentrix basenames
+    if (length(sdfs) == length(sentrix_bases)) {
+      names(sdfs) <- basemap$basename
+    } else if (is.null(names(sdfs))) {
+      names(sdfs) <- paste0("Sample_", seq_along(sdfs))
+    }
   } else {
+    # ---- Explicit file-path input: no sheet discovery ----
     if (verbose) message("  Processing ", length(input), " IDAT file(s)...")
     paths <- input
     if (length(paths) == 1L) {
@@ -47,15 +91,14 @@ process_idat_files <- function(input, n_cores, verbose) {
     } else {
       sdfs <- sesame::openSesame(paths, prep = "QCDPB", func = NULL)
     }
-  }
 
-  # Wrap single-SigDF returns in a list for uniform handling
-  if (!is.list(sdfs) || (!is.null(sdfs$Probe_ID) && !is.list(sdfs[[1]]))) {
-    sdfs <- list(sdfs)
-    names(sdfs) <- "Sample_1"
-  }
-  if (is.null(names(sdfs))) {
-    names(sdfs) <- paste0("Sample_", seq_along(sdfs))
+    if (!is.list(sdfs) || (!is.null(sdfs$Probe_ID) && !is.list(sdfs[[1]]))) {
+      sdfs <- list(sdfs)
+      names(sdfs) <- "Sample_1"
+    }
+    if (is.null(names(sdfs))) {
+      names(sdfs) <- paste0("Sample_", seq_along(sdfs))
+    }
   }
 
   # ---- Compute sex intensities from SigDFs (methylQC preferred input) ----
@@ -81,6 +124,30 @@ process_idat_files <- function(input, n_cores, verbose) {
     colnames(betas) <- names(sdfs)
   }
 
+  # Align discovered pheno to actual betas column order, if we have one
+  if (!is.null(.qc_env$discovered_pheno)) {
+    common <- intersect(colnames(betas), rownames(.qc_env$discovered_pheno))
+    if (length(common) != ncol(betas) && verbose) {
+      missing_pheno <- setdiff(colnames(betas), rownames(.qc_env$discovered_pheno))
+      if (length(missing_pheno) > 0L) {
+        message(sprintf(
+          "    %d sample(s) in betas have no discovered pheno row: %s",
+          length(missing_pheno),
+          paste(utils::head(missing_pheno, 3), collapse = ", ")))
+      }
+    }
+    # Reorder pheno; pad missing rows with synthesized entries
+    final_pheno <- .qc_env$discovered_pheno[
+      match(colnames(betas), rownames(.qc_env$discovered_pheno)), ,
+      drop = FALSE]
+    missing_idx <- which(is.na(rownames(final_pheno)))
+    for (mi in missing_idx) {
+      rownames(final_pheno)[mi] <- colnames(betas)[mi]
+      final_pheno[mi, "Sample_Name"] <- colnames(betas)[mi]
+    }
+    .qc_env$discovered_pheno <- final_pheno
+  }
+
   # SigDFs no longer needed -- free memory
   rm(sdfs)
   invisible(gc(verbose = FALSE))
@@ -90,11 +157,17 @@ process_idat_files <- function(input, n_cores, verbose) {
 
 
 #' Load beta values from various input formats
+#'
+#' Side effects when input is an IDAT directory: stashes a discovered pheno
+#' frame in \code{.qc_env$discovered_pheno}, available for use by clocker()
+#' when the user didn't supply one explicitly.
+#'
 #' @keywords internal
 load_input_data <- function(input, n_cores, verbose) {
 
-  # Reset cached sex signals from any previous run
-  .qc_env$sex_signals <- NULL
+  # Reset cached state from any previous run
+  .qc_env$sex_signals      <- NULL
+  .qc_env$discovered_pheno <- NULL
 
   if (is.matrix(input) || is.data.frame(input)) {
     betas <- as.matrix(input)

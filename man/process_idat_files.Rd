@@ -7,20 +7,18 @@
 process_idat_files(input, n_cores, verbose)
 }
 \description{
-Pipeline applied: "QCDPB" (QC, Detection p-value, Pval drop, Background,
-BMIQ). SigDFs are processed streaming so we never keep the full SigDF
-list in memory:
-\enumerate{
-\item Run openSesame to get one SigDF per sample
-\item For each SigDF: compute sex intensities (chrX, chrY) into a small
-data.frame, cache via cache_sex_signals()
-\item Extract betas via getBetas(sdf) and cbind into a matrix
-\item Drop SigDFs
-}
+Pipeline: SeSAMe "QCDPB" (QC mask, channel correction, dye-bias, pOOBAH
+detection p-values, BMIQ).
 }
 \details{
-Single-sample handling (FIX H6): when a single .idat path is supplied,
-the underlying sample basename is preserved in colnames(betas) rather
-than being replaced by an arbitrary index.
+When given a directory, the function recursively discovers IDAT files
+AND sample sheets, then drives openSesame with the discovered IDAT
+basenames so that subdirectory-organized layouts work correctly. The
+resulting per-sample pheno frame (with synthesized rows for any IDATs
+lacking a sample-sheet match) is stashed in
+\code{.qc_env$discovered_pheno} for the orchestrator to consume.
+
+Single-sample handling: when a single .idat path is supplied, the
+underlying sample basename is preserved in colnames(betas).
 }
 \keyword{internal}
